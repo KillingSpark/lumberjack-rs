@@ -1,25 +1,3 @@
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        use crate::Conf;
-        use std::io::Write;
-
-        let conf = Conf {
-            max_age: 1,
-            max_size: 20,
-            max_files: 2,
-            log_dir: "./test_logs".into(),
-            name_template: "mylog.log".to_owned(),
-        };
-
-        let mut logger = crate::new(conf).unwrap();
-        logger.write_all("REEEEEEEEEE\n".as_bytes()).unwrap();
-        logger.write_all("REEEEEEEEEE\n".as_bytes()).unwrap();
-        logger.write_all("REEEEEEEEEE\n".as_bytes()).unwrap();
-    }
-}
-
 use std::fs::File;
 use std::io::Write;
 use std::ops::Sub;
@@ -27,6 +5,8 @@ use std::path::PathBuf;
 use std::time;
 
 extern crate chrono;
+
+mod tests;
 
 pub struct Conf {
     pub max_age: u64,
@@ -39,6 +19,7 @@ pub struct Conf {
 pub struct Logger {
     conf: Conf,
     current_file: File,
+    current_file_path: PathBuf,
 }
 
 use chrono::prelude::*;
@@ -47,7 +28,7 @@ fn timestamp() -> String {
 
     formatted.to_string()
 }
-fn open_old_file(conf: &Conf) -> Option<File> {
+fn open_old_file(conf: &Conf) -> Option<(PathBuf,File)> {
     let files = match std::fs::read_dir(&conf.log_dir) {
         Ok(f) => f,
         Err(_) => return None,
@@ -65,15 +46,15 @@ fn open_old_file(conf: &Conf) -> Option<File> {
             .read(true)
             .write(true)
             .create(true)
-            .open(dir_entry)
+            .open(&dir_entry)
             .unwrap();
-        Some(file)
+        Some((dir_entry, file))
     } else {
         None
     }
 }
 
-fn open_next_file(conf: &Conf) -> std::io::Result<File> {
+fn open_next_file(conf: &Conf) -> std::io::Result<(PathBuf, File)> {
     let tmplt_split: Vec<_> = conf.name_template.split('.').collect();
     let mut new_file_name = String::new();
     new_file_name.push_str(tmplt_split[0]);
@@ -85,11 +66,11 @@ fn open_next_file(conf: &Conf) -> std::io::Result<File> {
     }
 
     let path = conf.log_dir.join(&new_file_name);
-    return File::create(path);
+    return File::create(&path).map(|x| (path, x));
 }
 
 pub fn new(conf: Conf) -> std::io::Result<Logger> {
-    let file = if let Some(f) = open_old_file(&conf) {
+    let (path, file) = if let Some(f) = open_old_file(&conf) {
         f
     } else {
         open_next_file(&conf)?
@@ -97,6 +78,7 @@ pub fn new(conf: Conf) -> std::io::Result<Logger> {
     Ok(Logger {
         conf: conf,
         current_file: file,
+        current_file_path: path,
     })
 }
 
@@ -104,20 +86,31 @@ fn days_to_secs(days: u64) -> u64 {
     days * 24 * 60 * 60
 }
 
+impl Conf {
+    fn age_threshold(&self) -> time::SystemTime {
+        time::SystemTime::now().sub(time::Duration::from_secs(days_to_secs(self.max_age)))
+    }
+}
+
 impl Logger {
     fn enforce_conf(&mut self) -> std::io::Result<()> {
         if self.current_file.metadata()?.len() > self.conf.max_size {
             self.current_file.flush()?;
             self.current_file.sync_all()?;
-            self.current_file = open_next_file(&self.conf)?;
+            let (path, file) = open_next_file(&self.conf)?;
+            self.current_file = file;
+            self.current_file_path = path;
         }
 
-        let time_threshold =
-            time::SystemTime::now().sub(time::Duration::from_secs(days_to_secs(self.conf.max_age)));
+        let time_threshold = self.conf.age_threshold();
         let files = std::fs::read_dir(&self.conf.log_dir)?;
         let mut resulting_files = Vec::new();
         for file in files {
             let file = file?;
+            if file.path().eq(&self.current_file_path) {
+                //dont remove the current file
+                continue
+            }
             if file.metadata()?.modified()? < time_threshold {
                 std::fs::remove_file(file.path())?;
             } else {
