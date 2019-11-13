@@ -107,8 +107,8 @@ fn days_to_secs(days: u64) -> u64 {
 impl Logger {
     fn enforce_conf(&mut self) -> std::io::Result<()> {
         if self.current_file.metadata()?.len() > self.conf.max_size {
-            self.current_file.sync_all()?;
             self.current_file.flush()?;
+            self.current_file.sync_all()?;
             self.current_file = open_next_file(&self.conf)?;
         }
 
