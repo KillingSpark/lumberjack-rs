@@ -9,4 +9,4 @@ These features should be supported
 - [x] Retiring files if a certain amount of files is reached in the directory
 
 These features might be supported
-- [] Compression
+- [ ] Compression
