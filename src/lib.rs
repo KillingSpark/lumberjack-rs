@@ -125,6 +125,9 @@ impl Logger {
             }
         }
 
+        //drop old files first
+        resulting_files.sort_by(|l, r| l.path().cmp(&r.path()));
+        resulting_files.reverse();
         if resulting_files.len() > self.conf.max_files {
             let files_to_remove = resulting_files.len() - self.conf.max_files;
             for file in &resulting_files[0..files_to_remove] {
