@@ -12,9 +12,10 @@ fn it_works() {
     std::fs::create_dir(&path).unwrap();
 
     let conf = Conf {
-        max_age: 1,
         max_size: 15,
-        max_files: 4,
+        max_age: Some(1),
+        max_files: Some(4),
+        
         log_dir: path.into(),
         name_template: "mylog.log".to_owned(),
     };

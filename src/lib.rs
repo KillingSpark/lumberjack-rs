@@ -9,9 +9,10 @@ extern crate chrono;
 mod tests;
 
 pub struct Conf {
-    pub max_age: u64,
     pub max_size: u64,
-    pub max_files: usize,
+    pub max_age: Option<u64>,
+    pub max_files: Option<usize>,
+
     pub log_dir: PathBuf,
     pub name_template: String,
 }
@@ -28,7 +29,7 @@ fn timestamp() -> String {
 
     formatted.to_string()
 }
-fn open_old_file(conf: &Conf) -> Option<(PathBuf,File)> {
+fn open_old_file(conf: &Conf) -> Option<(PathBuf, File)> {
     let files = match std::fs::read_dir(&conf.log_dir) {
         Ok(f) => f,
         Err(_) => return None,
@@ -88,7 +89,12 @@ fn days_to_secs(days: u64) -> u64 {
 
 impl Conf {
     fn age_threshold(&self) -> time::SystemTime {
-        time::SystemTime::now().sub(time::Duration::from_secs(days_to_secs(self.max_age)))
+        if let Some(max_age) = self.max_age {
+            time::SystemTime::now().sub(time::Duration::from_secs(days_to_secs(max_age)))
+        } else {
+            // this should be far enough in the past?
+            time::SystemTime::UNIX_EPOCH
+        }
     }
 }
 
@@ -102,6 +108,7 @@ impl Logger {
             self.current_file_path = path;
         }
 
+        //drop files that are too old
         let time_threshold = self.conf.age_threshold();
         let files = std::fs::read_dir(&self.conf.log_dir)?;
         let mut resulting_files = Vec::new();
@@ -109,7 +116,7 @@ impl Logger {
             let file = file?;
             if file.path().eq(&self.current_file_path) {
                 //dont remove the current file
-                continue
+                continue;
             }
             if file.metadata()?.modified()? < time_threshold {
                 std::fs::remove_file(file.path())?;
@@ -119,12 +126,14 @@ impl Logger {
         }
 
         //drop old files first
-        resulting_files.sort_by(|l, r| l.path().cmp(&r.path()));
-        resulting_files.reverse();
-        if resulting_files.len() > self.conf.max_files {
-            let files_to_remove = resulting_files.len() - self.conf.max_files;
-            for file in &resulting_files[0..files_to_remove] {
-                std::fs::remove_file(file.path())?;
+        if let Some(max_files) = self.conf.max_files {
+            resulting_files.sort_by(|l, r| l.path().cmp(&r.path()));
+            resulting_files.reverse();
+            if resulting_files.len() > max_files {
+                let files_to_remove = resulting_files.len() - max_files;
+                for file in &resulting_files[0..files_to_remove] {
+                    std::fs::remove_file(file.path())?;
+                }
             }
         }
 
@@ -134,7 +143,10 @@ impl Logger {
 
 impl Write for Logger {
     fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
-        self.enforce_conf()?;
+        //only enforce conf (delete old files) when a new file has to be created
+        if self.current_file.metadata()?.len() > self.conf.max_size {
+            self.enforce_conf()?;
+        }
         self.current_file.write(data)
     }
 
