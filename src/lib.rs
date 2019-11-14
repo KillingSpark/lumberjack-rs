@@ -116,6 +116,7 @@ impl Logger {
             let file = file?;
             if file.path().eq(&self.current_file_path) {
                 //dont remove the current file
+                resulting_files.push(file);
                 continue;
             }
             if file.metadata()?.modified()? < time_threshold {
@@ -128,7 +129,7 @@ impl Logger {
         //drop old files first
         if let Some(max_files) = self.conf.max_files {
             resulting_files.sort_by(|l, r| l.path().cmp(&r.path()));
-            resulting_files.reverse();
+            
             if resulting_files.len() > max_files {
                 let files_to_remove = resulting_files.len() - max_files;
                 for file in &resulting_files[0..files_to_remove] {
